@@ -2,7 +2,7 @@
 /**
  * @package php-svg-lib
  * @link    http://github.com/PhenX/php-svg-lib
- * @author  Fabien Ménager <fabien.menager@gmail.com>
+ * @author  Fabien MÃ©nager <fabien.menager@gmail.com>
  * @license GNU LGPLv3+ http://www.gnu.org/copyleft/lesser.html
  */
 
@@ -12,6 +12,27 @@ use Svg\Surface\SurfaceInterface;
 
 class Path extends Shape
 {
+    // kindly borrowed from fabric.util.parsePath.
+    /* @see https://github.com/fabricjs/fabric.js/blob/master/src/util/path.js#L664 */
+    const NUMBER_PATTERN = '([-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?)\s*';
+    const COMMA_PATTERN = '(?:\s+,?\s*|,\s*)?';
+    const FLAG_PATTERN = '([01])';
+    const ARC_REGEXP = '/'
+        . self::NUMBER_PATTERN
+        . self::COMMA_PATTERN
+        . self::NUMBER_PATTERN
+        . self::COMMA_PATTERN
+        . self::NUMBER_PATTERN
+        . self::COMMA_PATTERN
+        . self::FLAG_PATTERN
+        . self::COMMA_PATTERN
+        . self::FLAG_PATTERN
+        . self::COMMA_PATTERN
+        . self::NUMBER_PATTERN
+        . self::COMMA_PATTERN
+        . self::NUMBER_PATTERN
+        . '/';
+
     static $commandLengths = array(
         'm' => 2,
         'l' => 2,
@@ -29,24 +50,37 @@ class Path extends Shape
         'M' => 'L',
     );
 
-    public function start($attributes)
+    public static function parse(string $commandSequence): array
     {
-        if (!isset($attributes['d'])) {
-            $this->hasShape = false;
-
-            return;
-        }
-
         $commands = array();
-        preg_match_all('/([MZLHVCSQTAmzlhvcsqta])([eE ,\-.\d]+)*/', $attributes['d'], $commands, PREG_SET_ORDER);
-
+        preg_match_all('/([MZLHVCSQTAmzlhvcsqta])([eE ,\-.\d]+)*/', $commandSequence, $commands, PREG_SET_ORDER);
+        
         $path = array();
         foreach ($commands as $c) {
             if (count($c) == 3) {
+                $commandLower = strtolower($c[1]);
+
+                // arcs have special flags that apparently don't require spaces.
+                if ($commandLower === 'a' && preg_match_all(static::ARC_REGEXP, $c[2], $matches)) {
+                    $numberOfMatches = count($matches[0]);
+                    for ($k = 0; $k < $numberOfMatches; ++$k) {
+                        $path[] = [
+                            $c[1],
+                            $matches[1][$k],
+                            $matches[2][$k],
+                            $matches[3][$k],
+                            $matches[4][$k],
+                            $matches[5][$k],
+                            $matches[6][$k],
+                            $matches[7][$k],
+                        ];
+                    }
+                    continue;
+                }
+
                 $arguments = array();
                 preg_match_all('/([-+]?((\d+\.\d+)|((\d+)|(\.\d+)))(?:e[-+]?\d+)?)/i', $c[2], $arguments, PREG_PATTERN_ORDER);
                 $item = $arguments[0];
-                $commandLower = strtolower($c[1]);
 
                 if (
                     isset(self::$commandLengths[$commandLower]) &&
@@ -75,6 +109,18 @@ class Path extends Shape
             }
         }
 
+        return $path;
+    }
+
+    public function start($attributes)
+    {
+        if (!isset($attributes['d'])) {
+            $this->hasShape = false;
+
+            return;
+        }
+
+        $path = static::parse($attributes['d']);
         $surface = $this->document->getSurface();
 
         // From https://github.com/kangax/fabric.js/blob/master/src/shapes/path.class.js
@@ -525,4 +571,4 @@ class Path extends Shape
             return 2 * M_PI - ($ta - $tb);
         }
     }
-} 
+}
